@@ -2,7 +2,7 @@
 pragma solidity 0.8.17;
 import "hardhat/console.sol";
 
-import {IDestinationPool} from "../interfaces/IDestinationPool.sol";
+import {IDestinationPool} from "./interfaces/IDestinationPool.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IConnext} from "@connext/smart-contracts/contracts/core/connext/interfaces/IConnext.sol";
 import {IXReceiver} from "@connext/smart-contracts/contracts/core/connext/interfaces/IXReceiver.sol";
@@ -21,58 +21,50 @@ error StreamAlreadyActive();
 /// accross the bridge to the DestinationPool.
 
 contract OriginPool is SuperAppBase, IXReceiver {
-    // contract events
-    event xStreamFlowTrigger(
+    /// @dev Emitted when flow message is sent across the bridge.
+    /// @param flowRate Flow Rate, unadjusted to the pool.
+    event FlowStartMessage(
         address indexed sender,
         address indexed receiver,
-        address indexed selectedToken,
         int96 flowRate,
-        uint256 streamStatus,
-        uint256 startTime,
-        uint256 bufferFee,
-        uint256 networkFee,
-        uint32 destinationDomain
+        uint256 startTime
     );
-    event RebalanceMessageSent(uint256 amount);
-    event updatingPing(address sender, uint256 pingCount);
-    event StreamStart(
+    event FlowTopupMessage(
         address indexed sender,
         address indexed receiver,
-        address indexed tokenAddress,
-        int96 flowRate,
-        uint256 tokenAmount
+        int96 newFlowRate,
+        uint256 topupTime,
+        uint256 endTime
     );
-    event StreamUpdate(
+    event FlowEndMessage(
         address indexed sender,
         address indexed receiver,
-        address indexed tokenAddress,
-        int96 flowRate,
-        uint256 tokenAmount
+        int96 flowRate
     );
-    event StreamDelete(
-        address indexed sender,
-        address indexed receiver,
-        address indexed tokenAddress,
-        int96 flowRate,
-        uint256 tokenAmount
-    );
-    event UpgradeToken(address indexed baseToken, uint256 amount);
+
+    enum StreamOptions {
+        START,
+        TOPUP,
+        END
+    }
 
     /// @dev Emitted when rebalance message is sent across the bridge.
     /// @param amount Amount rebalanced (sent).
+    event RebalanceMessageSent(uint256 amount);
 
     /// @dev Connext contracts.
     IConnext public immutable connext =
-        IConnext(0xFCa08024A6D4bCc87275b1E4A1E22B71fAD7f649);
+        IConnext(0x2334937846Ab2A3FCE747b32587e1A1A2f6EEC5a);
+
     /// @dev Superfluid contracts.
     ISuperfluid public immutable host =
-        ISuperfluid(0x22ff293e14F1EC3A09B137e9e06084AFd63adDF9);
+        ISuperfluid(0xEB796bdb90fFA0f28255275e16936D25d3418603);
     IConstantFlowAgreementV1 public immutable cfa =
-        IConstantFlowAgreementV1(0xEd6BcbF6907D4feEEe8a8875543249bEa9D308E8);
+        IConstantFlowAgreementV1(0x49e565Ed1bdc17F3d220f72DF0857C26FA83F873);
     ISuperToken public immutable superToken =
-        ISuperToken(0x3427910EBBdABAD8e02823DFe05D34a65564b1a0); // TESTx on goerli
+        ISuperToken(0xFB5fbd3B9c471c1109A3e0AD67BfD00eE007f70A);
     IERC20 public erc20Token =
-        IERC20(0x7ea6eA49B0b0Ae9c5db7907d139D9Cd3439862a1); // TEST on goerli
+        IERC20(0xeDb95D8037f769B72AAab41deeC92903A98C9E16);
 
     /// @dev Validates callbacks.
     /// @param _agreementClass MUST be CFA.
@@ -86,7 +78,10 @@ contract OriginPool is SuperAppBase, IXReceiver {
 
     constructor() {
         // surely this can't go wrong
-        IERC20(erc20Token).approve(address(connext), type(uint256).max);
+        IERC20(superToken.getUnderlyingToken()).approve(
+            address(connext),
+            type(uint256).max
+        );
 
         // register app
         host.registerApp(
@@ -103,9 +98,10 @@ contract OriginPool is SuperAppBase, IXReceiver {
     fallback() external payable {}
 
     /// @dev Rebalances pools. This sends funds over the bridge to the destination.
-    function rebalance(uint32 destinationDomain, address destinationContract)
-        external
-    {
+    function rebalance(
+        uint32 destinationDomain,
+        address destinationContract
+    ) external {
         _sendRebalanceMessage(destinationDomain, destinationContract);
     }
 
@@ -120,7 +116,7 @@ contract OriginPool is SuperAppBase, IXReceiver {
         address bridgingToken,
         address destinationContract,
         uint32 destinationDomain
-    ) external payable {
+    ) public payable {
         if (bridgingToken == address(superToken)) {
             // if user is sending Super Tokens
             ISuperToken(superToken).approve(address(this), type(uint256).max);
@@ -154,17 +150,35 @@ contract OriginPool is SuperAppBase, IXReceiver {
             slippage, // _slippage: the maximum amount of slippage the user will accept in BPS
             callData // _callData
         );
-        emit xStreamFlowTrigger(
-            msg.sender,
-            receiver,
-            address(bridgingToken),
-            flowRate,
-            1,
-            block.timestamp,
-            0,
-            relayerFee,
-            destinationDomain
-        );
+        emit FlowStartMessage(msg.sender, receiver, flowRate, block.timestamp);
+    }
+
+    function _sendToManyFlowMessage(
+        address[] calldata receivers,
+        int96[] calldata flowRates,
+        uint256 streamActionType,
+        // address receiver,
+        // int96 flowRate,
+        uint256 relayerFee,
+        uint256 slippage,
+        uint256 cost,
+        address bridgingToken,
+        address destinationContract,
+        uint32 destinationDomain
+    ) external payable {
+        for (uint256 i = 0; i < receivers.length; i++) {
+            _sendFlowMessage(
+                streamActionType,
+                receivers[i],
+                flowRates[i],
+                relayerFee,
+                slippage,
+                cost,
+                bridgingToken,
+                destinationContract,
+                destinationDomain
+            );
+        }
     }
 
     /// @dev Sends rebalance message with the full balance of this pool. No need to collect dust.
@@ -203,6 +217,15 @@ contract OriginPool is SuperAppBase, IXReceiver {
     uint256 public amount;
     uint256 public testIncrement;
 
+    event updatingPing(address sender, uint256 pingCount);
+    event StreamStart(address indexed sender, address receiver, int96 flowRate);
+    event StreamUpdate(
+        address indexed sender,
+        address indexed receiver,
+        int96 flowRate
+    );
+    event StreamDelete(address indexed sender, address indexed receiver);
+
     // receive functions
 
     /// @dev Virtual "flow rate" of fees being accrued in real time.
@@ -222,16 +245,26 @@ contract OriginPool is SuperAppBase, IXReceiver {
     function receiveFlowMessage(address account, int96 flowRate) public {
         // 0.1%
         int96 feeFlowRate = (flowRate * 10) / 10000;
+
         // update fee accrual rate
         _updateFeeFlowRate(feeFlowRate);
+
         // Adjust for fee on the destination for fee computation.
         int96 flowRateAdjusted = flowRate - feeFlowRate;
+
+        // if possible, upgrade all non-super tokens in the pool
+        // uint256 balance = IERC20(token.getUnderlyingToken()).balanceOf(address(this));
+
+        // if (balance > 0) token.upgrade(balance);
+
         (, int96 existingFlowRate, , ) = cfa.getFlow(
             superToken,
             address(this),
             account
         );
+
         bytes memory callData;
+
         if (existingFlowRate == 0) {
             if (flowRateAdjusted == 0) return; // do not revert
             // create
@@ -252,7 +285,10 @@ contract OriginPool is SuperAppBase, IXReceiver {
                 (superToken, address(this), account, new bytes(0))
             );
         }
+
         host.callAgreement(cfa, callData, new bytes(0));
+
+        // emit FlowMessageReceived(account, flowRateAdjusted);
     }
 
     function xReceive(
@@ -263,22 +299,28 @@ contract OriginPool is SuperAppBase, IXReceiver {
         uint32 _origin,
         bytes memory _callData
     ) external returns (bytes memory) {
+        // Unpack the _callData
+
         (streamActionType, sender, receiver, flowRate, startTime) = abi.decode(
             _callData,
             (uint256, address, address, int96, uint256)
         );
         amount = _amount;
+        // some event will be triggered here which will call the chainlink
+        // automation contracts then it will run the corresponding superfluid
+        // functions in this contract.
         approveSuperToken(address(_asset), _amount);
-        receiveFlowMessage(receiver, flowRate);
-
         if (streamActionType == 1) {
-            emit StreamStart(sender, receiver, _asset, flowRate, _amount);
+            emit StreamStart(msg.sender, receiver, flowRate);
         } else if (streamActionType == 2) {
-            emit StreamUpdate(sender, receiver, _asset, flowRate, _amount);
+            emit StreamUpdate(sender, receiver, flowRate);
         } else {
-            emit StreamDelete(sender, receiver, _asset, int96(0), uint256(0));
+            emit StreamDelete(sender, receiver);
         }
+        receiveFlowMessage(receiver, flowRate);
     }
+
+    event UpgradeToken(address indexed baseToken, uint256 amount);
 
     function approveSuperToken(address _asset, uint256 _amount) public {
         IERC20(_asset).approve(address(superToken), _amount); // approving the superToken contract to upgrade TEST
