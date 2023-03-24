@@ -49,6 +49,19 @@ contract OriginPool is SuperAppBase, IXReceiver, OpsTaskCreator {
         int96 flowRate
     );
 
+    event XStreamFlowTrigger(
+        address indexed sender,
+        address indexed receiver,
+        address indexed selectedToken,
+        int96 flowRate,
+        uint256 amount,
+        uint256 streamStatus,
+        uint256 startTime,
+        uint256 bufferFee,
+        uint256 networkFee,
+        uint32 destinationDomain
+    );
+
     enum StreamOptions {
         START,
         TOPUP,
@@ -217,7 +230,18 @@ contract OriginPool is SuperAppBase, IXReceiver, OpsTaskCreator {
             slippage, // _slippage: the maximum amount of slippage the user will accept in BPS
             callData // _callData
         );
-        emit FlowStartMessage(msg.sender, receiver, flowRate, block.timestamp);
+        emit XStreamFlowTrigger(
+            msg.sender,
+            receiver,
+            address(bridgingToken),
+            flowRate,
+            cost,
+            1,
+            block.timestamp,
+            0,
+            relayerFee,
+            destinationDomain
+        );
     }
 
     function _sendToManyFlowMessage(
@@ -282,16 +306,25 @@ contract OriginPool is SuperAppBase, IXReceiver, OpsTaskCreator {
     int96 public flowRate;
     uint256 public startTime;
     uint256 public amount;
-    uint256 public testIncrement;
 
-    event updatingPing(address sender, uint256 pingCount);
-    event StreamStart(address indexed sender, address receiver, int96 flowRate);
+    event StreamStart(address indexed sender, address receiver, int96 flowRate, uint256 startTime);
     event StreamUpdate(
         address indexed sender,
         address indexed receiver,
-        int96 flowRate
+        int96 flowRate,
+        uint256 startTime
     );
     event StreamDelete(address indexed sender, address indexed receiver);
+    event XReceiveData(
+        address indexed originSender, 
+        uint32 origin, 
+        address asset, 
+        uint256 amount, 
+        bytes32 transferId, 
+        uint256 receiveTimestamp,
+        address senderAccount,
+        address receiverAccount,
+        int256 flowRate);
 
     // receive functions
 
@@ -388,16 +421,23 @@ contract OriginPool is SuperAppBase, IXReceiver, OpsTaskCreator {
             (uint256, address, address, int96, uint256)
         );
         amount = _amount;
-        // some event will be triggered here which will call the chainlink
-        // automation contracts then it will run the corresponding superfluid
-        // functions in this contract.
+        emit XReceiveData (
+            _originSender, 
+            _origin, 
+            _asset, 
+            _amount, 
+            _transferId,
+            block.timestamp,
+            sender,
+            receiver,
+            flowRate);
         approveSuperToken(address(_asset), _amount);
         receiveFlowMessage(receiver, flowRate, _amount, startTime);
 
         if (streamActionType == 1) {
-            emit StreamStart(msg.sender, receiver, flowRate);
+            emit StreamStart(msg.sender, receiver, flowRate, startTime);
         } else if (streamActionType == 2) {
-            emit StreamUpdate(sender, receiver, flowRate);
+            emit StreamUpdate(sender, receiver, flowRate, startTime);
         } else {
             emit StreamDelete(sender, receiver);
         }
