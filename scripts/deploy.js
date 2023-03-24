@@ -8,13 +8,13 @@ const hre = require("hardhat");
 
 async function main() {
 
-  const OriginPool = await hre.ethers.getContractFactory("OriginPool");
-  const originPool = await OriginPool.deploy();
+  const XStreamPool = await hre.ethers.getContractFactory("XStreamPool");
+  const xStreamPool = await XStreamPool.deploy();
 
-  await originPool.deployed();
+  await xStreamPool.deployed();
 
   console.log(
-    `Deployed to ${originPool.address}`
+    `Deployed to ${xStreamPool.address}`
   );
 }
 
