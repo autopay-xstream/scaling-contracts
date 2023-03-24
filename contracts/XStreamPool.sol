@@ -27,7 +27,7 @@ error StreamAlreadyActive();
 /// @notice This is a super app. On stream (create|update|delete), this contract sends a message
 /// accross the bridge to the DestinationPool.
 
-contract OriginPool is SuperAppBase, IXReceiver, OpsTaskCreator {
+contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
     /// @dev Emitted when flow message is sent across the bridge.
     /// @param flowRate Flow Rate, unadjusted to the pool.
     event FlowStartMessage(
