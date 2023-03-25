@@ -72,33 +72,33 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
     /// @param amount Amount rebalanced (sent).
     event RebalanceMessageSent(uint256 amount);
 
-    // /// @dev Connext contracts POLYGON.
-    // IConnext public immutable connext =
-    //     IConnext(0x2334937846Ab2A3FCE747b32587e1A1A2f6EEC5a);
-
-    // /// @dev Superfluid contracts.
-    // ISuperfluid public immutable host =
-    //     ISuperfluid(0xEB796bdb90fFA0f28255275e16936D25d3418603);
-    // IConstantFlowAgreementV1 public immutable cfa =
-    //     IConstantFlowAgreementV1(0x49e565Ed1bdc17F3d220f72DF0857C26FA83F873);
-    // ISuperToken public immutable superToken =
-    //     ISuperToken(0xFB5fbd3B9c471c1109A3e0AD67BfD00eE007f70A);
-    // IERC20 public erc20Token =
-    //     IERC20(0xeDb95D8037f769B72AAab41deeC92903A98C9E16);
-   
-    /// @dev Connext contracts POLYGON.
+    /// @dev Connext contracts MUMBAI.
     IConnext public immutable connext =
-        IConnext(0xFCa08024A6D4bCc87275b1E4A1E22B71fAD7f649);
+        IConnext(0x2334937846Ab2A3FCE747b32587e1A1A2f6EEC5a);
 
     /// @dev Superfluid contracts.
     ISuperfluid public immutable host =
-        ISuperfluid(0x22ff293e14F1EC3A09B137e9e06084AFd63adDF9);
+        ISuperfluid(0xEB796bdb90fFA0f28255275e16936D25d3418603);
     IConstantFlowAgreementV1 public immutable cfa =
-        IConstantFlowAgreementV1(0xEd6BcbF6907D4feEEe8a8875543249bEa9D308E8);
+        IConstantFlowAgreementV1(0x49e565Ed1bdc17F3d220f72DF0857C26FA83F873);
     ISuperToken public immutable superToken =
-        ISuperToken(0x3427910EBBdABAD8e02823DFe05D34a65564b1a0);
+        ISuperToken(0xFB5fbd3B9c471c1109A3e0AD67BfD00eE007f70A);
     IERC20 public erc20Token =
-        IERC20(0x7ea6eA49B0b0Ae9c5db7907d139D9Cd3439862a1);
+        IERC20(0xeDb95D8037f769B72AAab41deeC92903A98C9E16);
+   
+    // /// @dev Connext contracts GOERLI.
+    // IConnext public immutable connext =
+    //     IConnext(0xFCa08024A6D4bCc87275b1E4A1E22B71fAD7f649);
+
+    // /// @dev Superfluid contracts.
+    // ISuperfluid public immutable host =
+    //     ISuperfluid(0x22ff293e14F1EC3A09B137e9e06084AFd63adDF9);
+    // IConstantFlowAgreementV1 public immutable cfa =
+    //     IConstantFlowAgreementV1(0xEd6BcbF6907D4feEEe8a8875543249bEa9D308E8);
+    // ISuperToken public immutable superToken =
+    //     ISuperToken(0x3427910EBBdABAD8e02823DFe05D34a65564b1a0);
+    // IERC20 public erc20Token =
+    //     IERC20(0x7ea6eA49B0b0Ae9c5db7907d139D9Cd3439862a1);
 
     /// @dev Validates callbacks.
     /// @param _agreementClass MUST be CFA.
@@ -110,12 +110,12 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
         _;
     }
 
-    // /// @dev Gelato OPs Contract MUMBAI
-    // address payable _ops = payable(0xB3f5503f93d5Ef84b06993a1975B9D21B962892F);
+    /// @dev Gelato OPs Contract MUMBAI
+    address payable _ops = payable(0xB3f5503f93d5Ef84b06993a1975B9D21B962892F);
     
     
-    /// @dev Gelato OPs Contract GOERLI
-    address payable _ops = payable(0xc1C6805B857Bef1f412519C4A842522431aFed39);
+    // /// @dev Gelato OPs Contract GOERLI
+    // address payable _ops = payable(0xc1C6805B857Bef1f412519C4A842522431aFed39);
 
     constructor() OpsTaskCreator(_ops, msg.sender) {
         // surely this can't go wrong
@@ -247,12 +247,13 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
     function _sendToManyFlowMessage(
         address[] calldata receivers,
         int96[] calldata flowRates,
+        uint96[] memory costs,
         uint256 streamActionType,
         // address receiver,
         // int96 flowRate,
         uint256 relayerFee,
         uint256 slippage,
-        uint256 cost,
+        // uint256 cost,
         address bridgingToken,
         address destinationContract,
         uint32 destinationDomain
@@ -264,7 +265,7 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
                 flowRates[i],
                 relayerFee,
                 slippage,
-                cost,
+                costs[i],
                 bridgingToken,
                 destinationContract,
                 destinationDomain
