@@ -19,7 +19,15 @@ module.exports = {
     mumbai: {
       url: process.env.ALCHEMY_MUMBAI_API_URL,
       accounts: [process.env.PRIVATE_KEY]
-    }
+    },
+    gnosis: {
+      url: process.env.ALCHEMY_GNOSIS_API_URL,
+      accounts: [process.env.PRIVATE_KEY]
+    },
+    polygon: {
+      url: process.env.ALCHEMY_POLYGON_API_URL,
+      accounts: [process.env.PRIVATE_KEY]
+    },
   },
   etherscan: {
     apiKey: process.env.POLYGONSCAN_API_KEY
