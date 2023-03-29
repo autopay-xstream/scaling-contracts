@@ -4,12 +4,20 @@ require("@nomiclabs/hardhat-etherscan");
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
-  solidity: "0.8.17",
+  solidity: {
+    version: "0.8.17",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200
+      }
+    }
+  },
   networks: {
     hardhat: {
       forking: {
-        url: process.env.ALCHEMY_GOERLI_API_URL, // goerli testnet
-        blockNumber: 8439100
+        url: process.env.ALCHEMY_MUMBAI_API_URL ,
+        blockNumber: 27143614
       }
     },
     goerli: {
@@ -18,11 +26,12 @@ module.exports = {
     },
     mumbai: {
       url: process.env.ALCHEMY_MUMBAI_API_URL,
-      accounts: [process.env.PRIVATE_KEY]
+      accounts: [process.env.PRIVATE_KEY],
+      gasPrice: 1000000000000
     },
     gnosis: {
       url: process.env.ALCHEMY_GNOSIS_API_URL,
-      accounts: [process.env.PRIVATE_KEY]
+      accounts: [process.env.PRIVATE_KEY2]
     },
     polygon: {
       url: process.env.ALCHEMY_POLYGON_API_URL,
