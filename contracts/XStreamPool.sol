@@ -116,6 +116,31 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
         _sendRebalanceMessage(destinationDomain, destinationContract);
     }
 
+    function xTransfer(
+        address _recipient,
+        uint32 _originDomain,
+        uint256 _amount,
+        // uint256 _slippage,
+        uint256 _relayerFee
+    ) internal {
+        // This contract approves transfer to Connext
+        erc20Token.approve(address(connext), _amount);
+
+        uint256 _slippage = 300;
+        uint256 remainingBalance = _amount -
+            superToken.balanceOf(address(this));
+
+        connext.xcall{value: _relayerFee}(
+            _originDomain, // _destination: Domain ID of the destination chain
+            _recipient, // _to: address receiving the funds on the destination
+            address(erc20Token), // _asset: address of the token contract
+            msg.sender, // _delegate: address that can revert or forceLocal on destination
+            remainingBalance, // _amount: amount of tokens to transfer
+            _slippage, // _slippage: the maximum amount of slippage the user will accept in BPS
+            "" // _callData: empty because we're only sending funds
+        );
+    }
+
     function deleteStream(address account) external {
         bytes memory _callData = abi.encodeCall(
             cfa.deleteFlow,
@@ -160,7 +185,7 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
         uint256 _streamActionType,
         address _receiver,
         int96 _flowRate,
-        uint256 relayerFee, // currently hardcoded
+        uint256 _relayerFee, // currently hardcoded
         uint256 slippage,
         uint256 cost,
         address bridgingToken,
@@ -189,9 +214,11 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
             msg.sender,
             _receiver,
             _flowRate,
-            block.timestamp
+            block.timestamp,
+            _relayerFee
         );
-        connext.xcall{value: relayerFee}(
+
+        connext.xcall{value: _relayerFee}(
             destinationDomain, // _destination: Domain ID of the destination chain
             destinationContract, // _to: contract address receiving the funds on the destination chain
             address(bridgingToken), // _asset: address of the token contract
@@ -200,6 +227,7 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
             slippage, // _slippage: the maximum amount of slippage the user will accept in BPS
             callData // _callData
         );
+
         emit XStreamFlowTrigger(
             msg.sender,
             _receiver,
@@ -209,7 +237,7 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
             1,
             block.timestamp,
             0,
-            relayerFee,
+            _relayerFee,
             destinationDomain
         );
     }
@@ -221,7 +249,7 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
         uint256 _streamActionType,
         // address receiver,
         // int96 flowRate,
-        uint256 relayerFee,
+        uint256 _relayerFee,
         uint256 slippage,
         // uint256 cost,
         address bridgingToken,
@@ -233,7 +261,7 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
                 _streamActionType,
                 receivers[i],
                 flowRates[i],
-                relayerFee,
+                _relayerFee,
                 slippage,
                 costs[i],
                 bridgingToken,
@@ -255,9 +283,9 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
         bytes memory callData = abi.encodeWithSelector(
             IDestinationPool.receiveRebalanceMessage.selector
         );
-        uint256 relayerFee = 0;
+        uint256 _relayerFee = 0;
         uint256 slippage = 0;
-        connext.xcall{value: relayerFee}(
+        connext.xcall{value: _relayerFee}(
             destinationDomain, // _destination: Domain ID of the destination chain
             destinationContract, // _to: contract address receiving the funds on the destination chain
             superToken.getUnderlyingToken(), // _asset: address of the token contract
@@ -270,13 +298,6 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
     }
 
     /////////////////////////////////////////////////// Current Contract as DestinationPool //////////////////////////////////////
-
-    uint256 public streamActionType; // 1 -> Start stream, 2 -> Topup stream, 3 -> Delete stream
-    address public sender;
-    address public receiver;
-    int96 public flowRate;
-    uint256 public startTime;
-    uint256 public amount;
 
     event StreamStart(
         address indexed sender,
@@ -306,35 +327,13 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
 
     // receive functions
 
-    /// @dev Virtual "flow rate" of fees being accrued in real time.
-    int96 public feeAccrualRate;
-    /// @dev Last update's timestamp of the `feeAccrualRate`.
-    uint256 public lastFeeAccrualUpdate;
-    /// @dev Fees pending that are NOT included in the `feeAccrualRate`
-    //   TODO this might not be necessary since the full balance is sent on flow update.
-    uint256 public feesPending;
-
-    function _updateFeeFlowRate(int96 feeFlowRate) internal {
-        feesPending = 0;
-        feeAccrualRate += feeFlowRate;
-        lastFeeAccrualUpdate = block.timestamp;
-    }
-
     function receiveFlowMessage(
         address _account,
         int96 _flowRate,
         uint256 _amount,
-        uint256 _startTime // override
+        uint256 _startTime,
+        uint256 _streamActionType
     ) public {
-        // 0.1%
-        int96 feeFlowRate = (_flowRate * 10) / 10000;
-
-        // update fee accrual rate
-        _updateFeeFlowRate(feeFlowRate);
-
-        // Adjust for fee on the destination for fee computation.
-        int96 flowRateAdjusted = _flowRate - feeFlowRate;
-
         // if possible, upgrade all non-super tokens in the pool
         // uint256 balance = IERC20(token.getUnderlyingToken()).balanceOf(address(this));
 
@@ -348,20 +347,31 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
 
         bytes memory callData;
 
-        if (existingFlowRate == 0) {
-            if (flowRateAdjusted == 0) return; // do not revert
+        if (_streamActionType == 1) {
+            if (_flowRate == 0) return; // do not revert
             // create
-            callData = abi.encodeCall(
-                cfa.createFlow,
-                (superToken, _account, flowRateAdjusted, new bytes(0))
-            );
-        } else if (flowRateAdjusted > 0) {
+            if (existingFlowRate == 0) {
+                callData = abi.encodeCall(
+                    cfa.createFlow,
+                    (superToken, _account, _flowRate, new bytes(0))
+                );
+
+                /// @dev Gelato OPS is called here
+                uint256 _interval = _amount / uint256(uint96(_flowRate));
+                createTask(_account, _interval, _startTime);
+            } else {
+                callData = abi.encodeCall(
+                    cfa.updateFlow,
+                    (superToken, _account, _flowRate, new bytes(0))
+                );
+            }
+        } else if (_streamActionType == 2) {
             // update
             callData = abi.encodeCall(
                 cfa.updateFlow,
-                (superToken, _account, flowRateAdjusted, new bytes(0))
+                (superToken, _account, _flowRate, new bytes(0))
             );
-        } else {
+        } else if (_streamActionType == 3) {
             // delete
             callData = abi.encodeCall(
                 cfa.deleteFlow,
@@ -370,18 +380,16 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
         }
 
         host.callAgreement(cfa, callData, new bytes(0));
-
-        /// @dev Gelato OPS is called here
-        if (existingFlowRate == 0) {
-            if (flowRateAdjusted == 0) return; // do not revert
-            // create task
-            uint256 _interval = _amount / uint256(uint96(flowRateAdjusted));
-            // uint256 _interval = 100;
-            createTask(_account, _interval, _startTime);
-        }
-
         // emit FlowMessageReceived(account, flowRateAdjusted);
     }
+
+    uint256 public streamActionType; // 1 -> Start stream, 2 -> Topup stream, 3 -> Delete stream
+    address public sender;
+    address public receiver;
+    int96 public flowRate;
+    uint256 public startTime;
+    uint256 public amount;
+    uint256 public relayerFee;
 
     function xReceive(
         bytes32 _transferId,
@@ -393,9 +401,16 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
     ) external returns (bytes memory) {
         // Unpack the _callData
 
-        (streamActionType, sender, receiver, flowRate, startTime) = abi.decode(
+        (
+            streamActionType,
+            sender,
+            receiver,
+            flowRate,
+            startTime,
+            relayerFee
+        ) = abi.decode(
             _callData,
-            (uint256, address, address, int96, uint256)
+            (uint256, address, address, int96, uint256, uint256)
         );
         amount = _amount;
         emit XReceiveData(
@@ -410,13 +425,21 @@ contract XStreamPool is SuperAppBase, IXReceiver, OpsTaskCreator {
             flowRate
         );
         approveSuperToken(address(_asset), _amount);
-        receiveFlowMessage(receiver, flowRate, _amount, startTime);
+        receiveFlowMessage(
+            receiver,
+            flowRate,
+            _amount,
+            startTime,
+            streamActionType
+        );
 
         if (streamActionType == 1) {
             emit StreamStart(msg.sender, receiver, flowRate, startTime);
         } else if (streamActionType == 2) {
             emit StreamUpdate(sender, receiver, flowRate, startTime);
         } else {
+            xTransfer(sender, _origin, _amount, relayerFee);
+
             emit StreamDelete(sender, receiver);
         }
         // receiveFlowMessage(receiver, flowRate);
